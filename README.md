@@ -16,18 +16,23 @@ tool design, resilience, observability, and tests** — not a heavy UI.
 
 ## ✨ What it does
 
-- **Tool-calling agent** — Gemini chooses which GitHub API calls to make, with
+- **Tool-calling agent** — the LLM chooses which GitHub API calls to make, with
   arguments, to answer a question. Supports **multi-step** questions (chaining
   several tool calls before answering).
-- **Four read-only tools** — repo info, user info, language breakdown, recent commits.
+- **Five read-only tools** — repo info, user info, language breakdown, recent
+  commits, and a user's repositories.
 - **Strict argument validation** — every tool call the model produces is validated
   with Pydantic (`extra="forbid"`) before execution; bad arguments are fed back to
   the model to self-correct instead of crashing.
 - **Resilient GitHub client** — timeouts, retry-with-backoff on transient failures,
   a TTL cache, and graceful handling of GitHub's rate limit.
+- **Pluggable LLM** — Groq (default, fast + generous free tier) or Gemini, via one
+  env var.
+- **Conversation memory** — Redis-backed sessions so follow-up questions resolve
+  references ("the *above* user").
 - **Production-shaped API** — FastAPI with `/chat`, `/health`, `/metrics`, auto
   `/docs`, request tracing, usage counters, API-key auth, and CORS.
-- **Tested & evaluated** — 35 offline unit tests plus a behavioral eval harness.
+- **Tested & evaluated** — 60 offline tests plus a behavioral eval harness.
 
 ---
 
@@ -42,7 +47,8 @@ tool design, resilience, observability, and tests** — not a heavy UI.
                     send question  │                │ tool result
                     + tool specs   ▼                │ (or validation error)
                           ┌─────────────────┐       │
-                          │   Gemini LLM    │       │
+                          │   LLM (Groq /   │       │
+                          │     Gemini)     │       │
                           └─────────────────┘       │
                                    │                │
                     function call  │                │
@@ -62,10 +68,10 @@ tool design, resilience, observability, and tests** — not a heavy UI.
                            GitHub REST API
 ```
 
-1. The question and the **tool declarations** go to Gemini.
-2. If Gemini replies with a **function call**, the agent validates the arguments,
+1. The question and the **tool declarations** go to the LLM.
+2. If the LLM replies with a **function call**, the agent validates the arguments,
    runs the matching async tool, and sends the result back.
-3. Gemini observes the result and either calls another tool or writes the final
+3. The LLM observes the result and either calls another tool or writes the final
    answer. A `MAX_STEPS` cap guarantees termination.
 
 ---
@@ -88,16 +94,17 @@ tool design, resilience, observability, and tests** — not a heavy UI.
 ## 📁 Project structure
 
 ```
-github-agent/
+github-insights-agent/
 ├── app/
-│   ├── config.py          # settings from .env (keys, model, token, API key, CORS)
-│   ├── key_manager.py     # rotate up to 5 Gemini keys with cooldown
+│   ├── config.py          # settings from .env (provider, keys, model, token, CORS, Redis)
+│   ├── key_manager.py     # round-robin key rotation with cooldown
 │   ├── github_client.py   # async GitHub client: timeouts, retry/backoff, TTL cache
-│   ├── tools.py           # the 4 tools (shape GitHub JSON into small clean dicts)
-│   ├── schemas.py         # Pydantic arg schemas + Gemini function declarations
-│   ├── agent.py           # the async Reason→Act→Observe loop
+│   ├── tools.py           # the 5 tools (shape GitHub JSON into small clean dicts)
+│   ├── schemas.py         # Pydantic arg schemas + Gemini & Groq tool declarations
+│   ├── sessions.py        # Redis-backed conversation memory (in-memory fallback)
+│   ├── agent.py           # the async Reason→Act→Observe loop (Groq + Gemini)
 │   └── api.py             # FastAPI: /chat /health /metrics /docs + middleware
-├── tests/                 # 35 offline tests (faked GitHub + faked LLM)
+├── tests/                 # 60 offline tests (faked GitHub + faked LLM)
 ├── eval/                  # behavioral eval set + scoring harness
 ├── frontend/              # optional Vite + React chat UI (thin client over /chat)
 ├── demo.py                # drives the running API with example questions
@@ -121,13 +128,24 @@ github-agent/
 
 ## 🚀 Run it locally
 
+> **TL;DR for forkers:** clone → make a venv → `pip install -r requirements.txt` →
+> copy `.env.example` to `.env` and paste a free Groq key → `uvicorn app.api:app --reload`.
+> That's it. (Redis and a GitHub token are optional.)
+
+### Prerequisites
+- **Python 3.11+** (developed on 3.13)
+- A free **Groq API key** — https://console.groq.com/keys (one key is plenty)
+- *(optional)* **Redis** for persistent conversation memory — without it the app
+  falls back to in-memory sessions automatically
+- *(optional)* **Node 18+** if you want the React UI
+
 ### 1. Install
 ```bash
-git clone <your-repo-url>
-cd github-agent
+git clone https://github.com/Shagw/github-insights-agent.git
+cd github-insights-agent
 
-python3.13 -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+python3 -m venv venv
+source venv/bin/activate         # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -135,11 +153,19 @@ pip install -r requirements.txt
 ```bash
 cp .env.example .env
 ```
-Edit `.env`:
-- `GEMINI_API_KEY_1` — get one free at https://aistudio.google.com/app/apikey
-  (add up to 5 keys for rotation)
-- `GITHUB_TOKEN` — **optional**; without it you get 60 requests/hour, with it 5000
-- `API_KEY` — optional; if set, `/chat` requires the `X-API-Key` header
+Edit `.env` — the only thing you *need* is one LLM key:
+- `LLM_PROVIDER` — `groq` (default) or `gemini`
+- `GROQ_API_KEY` — free key from https://console.groq.com/keys
+- `GROQ_MODEL` — default `openai/gpt-oss-20b` (see
+  https://console.groq.com/docs/models for models your account can use)
+- `GITHUB_TOKEN` — **optional**; without it you get 60 GitHub requests/hour, with it 5000
+- `API_KEY` — **optional**; if set, `/chat` requires the `X-API-Key` header (leave
+  empty for local dev / the UI)
+- `REDIS_URL` — **optional**; defaults to `redis://localhost:6379/0`, falls back to
+  in-memory if unreachable
+
+> To use Gemini instead: set `LLM_PROVIDER=gemini` and `GEMINI_API_KEY_1=...`
+> (free key at https://aistudio.google.com/app/apikey).
 
 ### 3. Start the API
 ```bash
@@ -159,7 +185,6 @@ python demo.py "What languages is fastapi/fastapi written in?"
 ```bash
 curl -s http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
   -d '{"question": "How many stars does fastapi/fastapi have?"}' | jq
 ```
 
@@ -171,12 +196,13 @@ All tests run **offline** — GitHub is faked with `httpx.MockTransport` and the
 is faked with a scripted `FakeChat`, so no network or API quota is used.
 
 ```bash
-pytest                       # 35 tests
+pytest                       # 60 tests
 ```
 
 Covers: the resilient client (retry / no-retry / cache), tool response shaping,
-schema validation, the agent loop (single-tool, multi-tool, error recovery,
-refusal), and every API endpoint (auth, tracing, error mapping, CORS).
+schema validation, round-robin key rotation, the agent loop for **both** providers
+(single-tool, multi-tool, error recovery, refusal), Redis-backed sessions, and every
+API endpoint (auth, tracing, error mapping, CORS).
 
 ---
 
