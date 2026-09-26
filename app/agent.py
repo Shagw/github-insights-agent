@@ -129,23 +129,33 @@ def _new_chat(history: list[dict[str, str]] | None = None) -> Any:
     return model.start_chat(history=seeded)
 
 
-async def _send(chat: Any, message: Any) -> Any:
-    """Send a message to Gemini with key rotation, off the event loop.
+async def _send(chat: Any, message: Any, *, rebuild=None) -> tuple[Any, Any]:
+    """Send a message to Gemini with real key rotation, off the event loop.
 
-    The SDK is synchronous, so we run it in a thread. On a rate-limit error we
-    mark the key cooling and retry with the next key.
+    The Gemini SDK is synchronous (run in a thread) and binds a chat to the key
+    that was configured when the chat was created. So to *actually* switch keys
+    on a rate-limit we reconfigure with the next key AND rebuild the chat via the
+    `rebuild` callback (which replays history). Returns (response, chat) because
+    the chat object may have been replaced.
+
+    If `rebuild` is None (e.g. an injected FakeChat in tests), we just retry the
+    same chat object after reconfiguring.
     """
     last_error: Exception | None = None
     for _ in range(len(key_manager.keys)):
         current_key = key_manager.get_key()
         genai.configure(api_key=current_key)
         try:
-            return await asyncio.to_thread(chat.send_message, message)
+            response = await asyncio.to_thread(chat.send_message, message)
+            return response, chat
         except Exception as e:  # noqa: BLE001 - inspect message for rate-limit markers
             text = str(e).lower()
             if "429" in text or "quota" in text or "rate" in text or "resource" in text:
                 key_manager.mark_rate_limited(current_key)
                 last_error = e
+                if rebuild is not None:
+                    # rebuild the chat so the *next* key actually takes effect
+                    chat = rebuild()
                 continue
             raise
     raise AllKeysCoolingDown() if last_error else RuntimeError("send failed")
@@ -163,14 +173,26 @@ async def run_agent(
     follow-up references resolve. `chat` can be injected (a FakeChat) for offline
     testing; otherwise a real Gemini chat is started (seeded with `history`).
     """
+    injected = chat is not None  # tests inject a FakeChat; don't rebuild those
     if chat is None:
         chat = _new_chat(history)
 
+    # Running transcript for this request, used to rebuild the chat if we have to
+    # rotate keys mid-flight (the rebuilt chat replays everything so far).
+    running: list[dict[str, str]] = list(history or [])
+
+    def _rebuild() -> Any:
+        return _new_chat(running)
+
     tool_calls: list[dict[str, Any]] = []
     message: Any = question
+    running.append({"role": "user", "text": question})
 
     for step in range(1, MAX_STEPS + 1):
-        response = await _send(chat, message)
+        # FakeChat (tests) has no rebuild need; only pass rebuild for real chats.
+        response, chat = await _send(
+            chat, message, rebuild=None if injected else _rebuild
+        )
 
         fc = _extract_function_call(response)
         if fc is None:

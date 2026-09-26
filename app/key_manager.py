@@ -24,16 +24,28 @@ class KeyManager:
     def __init__(self, keys: list[str]):
         self.keys = keys
         self.cooldown_until: dict[str, float] = {}
+        self._cursor = 0  # round-robin position
         if not self.keys:
             raise ValueError(
                 "No Gemini API keys found. Set GEMINI_API_KEY_1 in your .env file."
             )
 
     def get_key(self) -> str:
-        """Return the first key not currently cooling down."""
+        """Return the next available key in round-robin order.
+
+        Consecutive calls hand out different keys (spreading load across the
+        pool so no single key is hammered against its per-minute limit). Keys
+        currently on cooldown are skipped. Raises AllKeysCoolingDown if every
+        key is cooling down.
+        """
         now = time.time()
-        for key in self.keys:
+        n = len(self.keys)
+        for offset in range(n):
+            idx = (self._cursor + offset) % n
+            key = self.keys[idx]
             if now >= self.cooldown_until.get(key, 0.0):
+                # advance the cursor past the key we're handing out
+                self._cursor = (idx + 1) % n
                 return key
         raise AllKeysCoolingDown()
 

@@ -71,3 +71,35 @@ async def test_direct_text_answer_no_tool(patch_client):
     assert res.steps == 1
     assert res.tool_calls == []
     assert "GitHub" in res.answer
+
+
+async def test_send_rotates_key_on_rate_limit(monkeypatch):
+    """_send should mark a rate-limited key, rebuild the chat, and use the next key."""
+    from app import key_manager as km_mod
+
+    # a fresh 3-key manager so we can observe rotation deterministically
+    test_km = km_mod.KeyManager(["K1", "K2", "K3"])
+    monkeypatch.setattr(agent, "key_manager", test_km)
+
+    configured = []
+    monkeypatch.setattr(agent.genai, "configure", lambda **kw: configured.append(kw["api_key"]))
+
+    class FailOnceChat:
+        """First send raises a 429; a rebuilt chat then succeeds."""
+        def __init__(self, fail):
+            self.fail = fail
+        def send_message(self, msg):
+            if self.fail:
+                raise RuntimeError("429 quota exceeded for this key")
+            return text_response("ok")
+
+    rebuilt = {"count": 0}
+    def rebuild():
+        rebuilt["count"] += 1
+        return FailOnceChat(fail=False)  # rebuilt chat succeeds
+
+    resp, chat = await agent._send(FailOnceChat(fail=True), "hi", rebuild=rebuild)
+    assert agent._extract_text(resp) == "ok"
+    assert rebuilt["count"] == 1                      # chat was rebuilt once
+    assert "K1" in configured and "K2" in configured  # rotated K1 -> K2
+    assert test_km.cooldown_until.get("K1", 0) > 0    # K1 marked cooling
