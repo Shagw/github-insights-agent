@@ -22,10 +22,11 @@ import asyncio
 from typing import Any, Callable
 
 import google.generativeai as genai
+from google.generativeai.types import RequestOptions
 from pydantic import ValidationError
 
 from app import tools
-from app.config import GEMINI_MODEL
+from app.config import GEMINI_MODEL, GEMINI_TIMEOUT
 from app.key_manager import AllKeysCoolingDown, key_manager
 from app.schemas import ARG_SCHEMAS, FUNCTION_DECLARATIONS
 
@@ -146,11 +147,19 @@ async def _send(chat: Any, message: Any, *, rebuild=None) -> tuple[Any, Any]:
         current_key = key_manager.get_key()
         genai.configure(api_key=current_key)
         try:
-            response = await asyncio.to_thread(chat.send_message, message)
+            response = await asyncio.to_thread(
+                chat.send_message,
+                message,
+                request_options=RequestOptions(timeout=GEMINI_TIMEOUT),
+            )
             return response, chat
-        except Exception as e:  # noqa: BLE001 - inspect message for rate-limit markers
+        except Exception as e:  # noqa: BLE001 - inspect message for rate-limit/timeout markers
             text = str(e).lower()
-            if "429" in text or "quota" in text or "rate" in text or "resource" in text:
+            retryable = (
+                "429" in text or "quota" in text or "rate" in text
+                or "resource" in text or "timeout" in text or "deadline" in text
+            )
+            if retryable:
                 key_manager.mark_rate_limited(current_key)
                 last_error = e
                 if rebuild is not None:

@@ -130,6 +130,6 @@ class FakeChat:
         self._scripted = list(scripted)
         self.sent = []
 
-    def send_message(self, message):
+    def send_message(self, message, **kwargs):
         self.sent.append(message)
         return self._scripted.pop(0)

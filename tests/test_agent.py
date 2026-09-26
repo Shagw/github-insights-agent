@@ -88,7 +88,7 @@ async def test_send_rotates_key_on_rate_limit(monkeypatch):
         """First send raises a 429; a rebuilt chat then succeeds."""
         def __init__(self, fail):
             self.fail = fail
-        def send_message(self, msg):
+        def send_message(self, msg, **kwargs):
             if self.fail:
                 raise RuntimeError("429 quota exceeded for this key")
             return text_response("ok")

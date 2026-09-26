@@ -29,6 +29,9 @@ def _collect_gemini_keys() -> list[str]:
 GEMINI_API_KEYS: list[str] = _collect_gemini_keys()
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip()
 GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "").strip()
+# Per-call timeout (seconds) for a single Gemini request, so a stalled/throttled
+# LLM call fails fast and we rotate to the next key instead of hanging.
+GEMINI_TIMEOUT: float = float(os.getenv("GEMINI_TIMEOUT", "30"))
 
 # --- Sessions ---
 REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0").strip()
