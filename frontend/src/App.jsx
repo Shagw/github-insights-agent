@@ -80,6 +80,9 @@ export default function App() {
       ]);
     } finally {
       setLoading(false);
+      setInput("");                    // ensure the field is cleared after every answer
+      // re-focus once React re-enables the (previously disabled) input
+      setTimeout(() => inputRef.current?.focus(), 0);
     }
   }
 
