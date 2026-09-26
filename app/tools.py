@@ -133,3 +133,40 @@ async def list_recent_commits(
             }
         )
     return {"repo": f"{owner}/{repo}", "count": len(commits), "commits": commits}
+
+
+async def list_user_repos(
+    username: str,
+    limit: int = 10,
+    sort: str = "updated",
+    *,
+    http_client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    """List a public GitHub user's or organization's repositories.
+
+    Args:
+        username: the GitHub login (e.g. "torvalds")
+        limit:    how many repos to return (1-30, default 10)
+        sort:     one of "updated" (recent activity), "created", "pushed",
+                  "full_name" (default "updated")
+    """
+    async with GitHubClient(client=http_client) as gh:
+        data = await gh.get(
+            f"/users/{username}/repos",
+            params={"per_page": limit, "sort": sort},
+        )
+
+    repos = []
+    for item in data if isinstance(data, list) else []:
+        repos.append(
+            {
+                "name": item.get("name"),
+                "full_name": item.get("full_name"),
+                "description": item.get("description"),
+                "stars": item.get("stargazers_count"),
+                "language": item.get("language"),
+                "updated_at": item.get("updated_at"),
+                "url": item.get("html_url"),
+            }
+        )
+    return {"user": username, "count": len(repos), "sort": sort, "repos": repos}

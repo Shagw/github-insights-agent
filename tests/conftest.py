@@ -52,6 +52,15 @@ def default_gh_handler(request: httpx.Request) -> httpx.Response:
             "location": "Portland", "public_repos": 8, "followers": 325253, "following": 0,
             "html_url": "https://github.com/torvalds", "created_at": "2011-09-03T15:26:22Z",
         })
+    if p == "/users/torvalds/repos":
+        return httpx.Response(200, json=[
+            {"name": "linux", "full_name": "torvalds/linux", "description": "Linux kernel",
+             "stargazers_count": 180000, "language": "C", "updated_at": "2024-01-02T00:00:00Z",
+             "html_url": "https://github.com/torvalds/linux"},
+            {"name": "subsurface", "full_name": "torvalds/subsurface", "description": "Dive log",
+             "stargazers_count": 3000, "language": "C++", "updated_at": "2023-06-01T00:00:00Z",
+             "html_url": "https://github.com/torvalds/subsurface"},
+        ])
     if p == "/repos/nope/nope":
         return httpx.Response(404, json={"message": "Not Found"})
     return httpx.Response(404, json={"message": "Not Found"})

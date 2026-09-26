@@ -20,6 +20,8 @@ view of each tool clean and under our control.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import google.generativeai as genai
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -84,6 +86,21 @@ class ListRecentCommitsArgs(BaseModel):
         return value
 
 
+class ListUserReposArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username: str
+    limit: int = Field(default=10, ge=1, le=30)
+    sort: Literal["updated", "created", "pushed", "full_name"] = "updated"
+
+    @field_validator("username")
+    @classmethod
+    def nonempty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("username must be a nonempty string")
+        return value
+
+
 # Maps a tool name -> its Pydantic validator. The agent uses this to validate
 # arguments before dispatching. Keeping it as a dict makes adding tools trivial.
 ARG_SCHEMAS: dict[str, type[BaseModel]] = {
@@ -91,6 +108,7 @@ ARG_SCHEMAS: dict[str, type[BaseModel]] = {
     "get_user_info": GetUserInfoArgs,
     "list_languages": ListLanguagesArgs,
     "list_recent_commits": ListRecentCommitsArgs,
+    "list_user_repos": ListUserReposArgs,
 }
 
 
@@ -193,10 +211,38 @@ list_recent_commits_declaration = genai.protos.FunctionDeclaration(
     ),
 )
 
+list_user_repos_declaration = genai.protos.FunctionDeclaration(
+    name="list_user_repos",
+    description=(
+        "List a public GitHub user's or organization's repositories, sorted by "
+        "recent activity by default. Use this when the user asks what repos / "
+        "projects someone has, or about their recent projects."
+    ),
+    parameters=genai.protos.Schema(
+        type=_Type.OBJECT,
+        properties={
+            "username": genai.protos.Schema(
+                type=_Type.STRING,
+                description="The GitHub login/handle, e.g. 'torvalds'.",
+            ),
+            "limit": genai.protos.Schema(
+                type=_Type.INTEGER,
+                description="How many repositories to return, 1-30 (default 10).",
+            ),
+            "sort": genai.protos.Schema(
+                type=_Type.STRING,
+                description="Sort order: 'updated' (default), 'created', 'pushed', or 'full_name'.",
+            ),
+        },
+        required=["username"],
+    ),
+)
+
 # The full set of declarations handed to the model as `tools=[...]`.
 FUNCTION_DECLARATIONS = [
     get_repo_info_declaration,
     get_user_info_declaration,
     list_languages_declaration,
     list_recent_commits_declaration,
+    list_user_repos_declaration,
 ]

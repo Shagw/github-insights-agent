@@ -10,6 +10,7 @@ from app.schemas import (
     ARG_SCHEMAS,
     GetRepoInfoArgs,
     ListRecentCommitsArgs,
+    ListUserReposArgs,
     FUNCTION_DECLARATIONS,
 )
 
@@ -79,12 +80,49 @@ def test_commit_limit_default():
     assert ListRecentCommitsArgs.model_validate({"owner": "a", "repo": "b"}).limit == 5
 
 
+async def test_list_user_repos_shape_async(make_fake_http):
+    async with make_fake_http() as c:
+        r = await tools.list_user_repos("torvalds", limit=2, http_client=c)
+    assert r["user"] == "torvalds"
+    assert r["count"] == 2
+    assert r["repos"][0]["name"] == "linux"
+    assert r["repos"][0]["stars"] == 180000
+    assert r["repos"][0]["language"] == "C"
+
+
+def test_user_repos_sort_validation():
+    # valid sort accepted
+    assert ListUserReposArgs.model_validate({"username": "x", "sort": "created"}).sort == "created"
+    # invalid sort rejected
+    with pytest.raises(ValidationError):
+        ListUserReposArgs.model_validate({"username": "x", "sort": "bogus"})
+
+
+@pytest.mark.parametrize("limit,ok", [(1, True), (30, True), (0, False), (31, False)])
+def test_user_repos_limit_bounds(limit, ok):
+    payload = {"username": "x", "limit": limit}
+    if ok:
+        assert ListUserReposArgs.model_validate(payload).limit == limit
+    else:
+        with pytest.raises(ValidationError):
+            ListUserReposArgs.model_validate(payload)
+
+
+def test_user_repos_defaults():
+    m = ListUserReposArgs.model_validate({"username": "x"})
+    assert m.limit == 10 and m.sort == "updated"
+
+
 def test_arg_schemas_cover_all_tools():
     assert set(ARG_SCHEMAS) == {
-        "get_repo_info", "get_user_info", "list_languages", "list_recent_commits"
+        "get_repo_info", "get_user_info", "list_languages",
+        "list_recent_commits", "list_user_repos",
     }
 
 
 def test_function_declarations_names():
     names = [d.name for d in FUNCTION_DECLARATIONS]
-    assert names == ["get_repo_info", "get_user_info", "list_languages", "list_recent_commits"]
+    assert names == [
+        "get_repo_info", "get_user_info", "list_languages",
+        "list_recent_commits", "list_user_repos",
+    ]

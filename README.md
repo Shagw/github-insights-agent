@@ -98,6 +98,7 @@ github-agent/
 │   └── api.py             # FastAPI: /chat /health /metrics /docs + middleware
 ├── tests/                 # 35 offline tests (faked GitHub + faked LLM)
 ├── eval/                  # behavioral eval set + scoring harness
+├── frontend/              # optional Vite + React chat UI (thin client over /chat)
 ├── demo.py                # drives the running API with example questions
 ├── requirements.txt
 └── .env.example
@@ -113,6 +114,7 @@ github-agent/
 | `get_user_info(username)` | `/users/{username}` | name, bio, company, location, public repos, followers |
 | `list_languages(owner, repo)` | `/repos/{owner}/{repo}/languages` | language breakdown as **percentages** |
 | `list_recent_commits(owner, repo, limit)` | `/repos/{owner}/{repo}/commits` | recent commits (sha, message, author, date) |
+| `list_user_repos(username, limit, sort)` | `/users/{username}/repos` | a user's repositories (name, stars, language), sorted by recent activity |
 
 ---
 
@@ -195,6 +197,35 @@ and out-of-scope/refuse (4). Each is graded on tool selection **and** answer con
 
 ---
 
+## 🖥️ Optional web UI (React)
+
+A minimal single-page chat UI lives in `frontend/` (Vite + React). It's a thin
+client over the same `/chat` API — the backend is the star; this is just a nicer
+way to demo it.
+
+```bash
+# 1. start the backend (in one terminal)
+uvicorn app.api:app --reload
+
+# 2. start the UI (in another terminal)
+cd frontend
+npm install
+npm run dev        # opens http://localhost:5173
+```
+
+In dev, Vite proxies `/api/*` to the backend at `http://localhost:8000`, so the
+browser talks to a single origin (no CORS friction).
+
+> **A note on auth and the UI.** The `X-API-Key` gate is a *server-side* control
+> for machine-to-machine callers (scripts, other services). An API key is a secret
+> and must never be shipped in browser code, so the web UI intentionally does **not**
+> send one — run the local backend with `API_KEY` unset (unauthenticated) for the UI.
+> For a browser app that needs protection, the right pattern is real user
+> authentication (login/session) or a backend-for-frontend that holds the key
+> server-side.
+
+---
+
 ## 💡 Design decisions (the interesting bits)
 
 - **Async throughout.** GitHub calls use `httpx.AsyncClient`; the synchronous Gemini
@@ -212,6 +243,10 @@ and out-of-scope/refuse (4). Each is graded on tool selection **and** answer con
   model keeps requesting tools.
 - **Key rotation.** Up to 5 Gemini keys rotate with a cooldown, so a single key's
   free-tier limit doesn't take the service down.
+- **Conversation memory via Redis.** `/chat` accepts a `session_id`; prior turns are
+  stored in Redis (with a TTL for auto-expiry) and replayed into the model so
+  follow-ups like *"how many repos does the above user have?"* resolve. If Redis is
+  down, it falls back to an in-memory store so the app still works.
 - **Observability.** Every request gets an id, is timed, and is logged; `/metrics`
   exposes simple usage counters.
 
@@ -224,7 +259,9 @@ and out-of-scope/refuse (4). Each is graded on tool selection **and** answer con
   would use Redis / a metrics backend.
 - **Gemini free-tier quota.** Live runs are limited by the daily quota; the tests and
   eval self-test are fully offline to work around this.
-- **No conversation memory across requests.** Each `/chat` call is independent (stateless).
+- **Conversation memory needs Redis for persistence.** Memory works out of the box
+  (in-memory fallback), but survives restarts / scales across instances only with
+  Redis running.
 
 ---
 
