@@ -46,6 +46,8 @@ def test_single_key_still_works():
     assert km.get_key() == "only"
 
 
-def test_empty_keys_rejected():
-    with pytest.raises(ValueError):
-        KeyManager([])
+def test_empty_keys_deferred_error():
+    from app.key_manager import NoKeysConfigured
+    km = KeyManager([])           # construction is fine (deferred)
+    with pytest.raises(NoKeysConfigured):
+        km.get_key()              # error only when a key is actually needed

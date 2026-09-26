@@ -1,7 +1,8 @@
 # 🐙 GitHub Insights Agent
 
 An **async AI agent** that answers natural-language questions about public GitHub
-repositories and users. It uses Google Gemini to reason, and calls the **GitHub
+repositories and users. It uses a fast LLM (Groq by default, Gemini optional) to
+reason, and calls the **GitHub
 REST API as tools** in a bounded Reason → Act → Observe loop — then grounds every
 answer in the data the tools returned.
 
@@ -74,7 +75,7 @@ tool design, resilience, observability, and tests** — not a heavy UI.
 | Layer | Choice | Why |
 |-------|--------|-----|
 | Language | **Python 3.13** | Strong typing + best LLM ecosystem |
-| LLM | **Gemini `gemini-flash-latest`** | Free tier, native function calling |
+| LLM | **Groq** (default, `openai/gpt-oss-20b`) or **Gemini** — pluggable via `LLM_PROVIDER` | Groq's free tier is fast + generous; both support tool calling |
 | Tool validation | **Pydantic v2** | Validates untrusted LLM args at the boundary |
 | HTTP client | **httpx (async)** | Async I/O + built-in timeouts for the resilience story |
 | External API | **GitHub REST API** | Public data; optional token raises the rate limit |
@@ -241,8 +242,12 @@ browser talks to a single origin (no CORS friction).
   self-correct.
 - **Bounded loop.** `MAX_STEPS` guarantees the agent always terminates, even if the
   model keeps requesting tools.
-- **Key rotation.** Up to 5 Gemini keys rotate with a cooldown, so a single key's
-  free-tier limit doesn't take the service down.
+- **Pluggable LLM provider.** The LLM is isolated behind the agent loop, so
+  switching backends is a contained change. `LLM_PROVIDER=groq` (default) uses
+  Groq's fast, generous free tier; `LLM_PROVIDER=gemini` uses Google Gemini. Tool
+  validation, dispatch, resilience, sessions, and the API are provider-agnostic.
+- **Key rotation.** Keys rotate round-robin with a cooldown, so load spreads
+  across the pool and a single key's rate limit doesn't take the service down.
 - **Conversation memory via Redis.** `/chat` accepts a `session_id`; prior turns are
   stored in Redis (with a TTL for auto-expiry) and replayed into the model so
   follow-ups like *"how many repos does the above user have?"* resolve. If Redis is

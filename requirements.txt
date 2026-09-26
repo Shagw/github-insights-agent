@@ -1,5 +1,6 @@
 # --- Core LLM ---
 google-generativeai==0.8.3      # Gemini SDK (function calling / tools)
+groq==0.11.0                    # Groq SDK (OpenAI-style tool calling, generous free tier)
 
 # --- Data validation ---
 pydantic==2.9.2                 # validate tool args before execution

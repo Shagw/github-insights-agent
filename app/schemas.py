@@ -246,3 +246,107 @@ FUNCTION_DECLARATIONS = [
     list_recent_commits_declaration,
     list_user_repos_declaration,
 ]
+
+
+# --------------------------------------------------------------------------
+# 3. Groq / OpenAI-style tool declarations (JSON-schema form)
+# --------------------------------------------------------------------------
+# Groq uses the OpenAI function-calling format: a list of
+# {"type": "function", "function": {name, description, parameters(JSON schema)}}.
+GROQ_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_repo_info",
+            "description": (
+                "Get summary facts about a public GitHub repository: stars, forks, "
+                "open issues, primary language, topics, description, timestamps."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "owner": {"type": "string", "description": "Repo owner, e.g. 'fastapi'."},
+                    "repo": {"type": "string", "description": "Repo name, e.g. 'fastapi'."},
+                },
+                "required": ["owner", "repo"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_user_info",
+            "description": (
+                "Get public profile facts about a GitHub user or organization: name, "
+                "bio, company, location, public repos, followers, following."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "username": {"type": "string", "description": "GitHub login, e.g. 'torvalds'."},
+                },
+                "required": ["username"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_languages",
+            "description": (
+                "Get the programming-language breakdown of a public GitHub repository "
+                "as percentages of code."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "owner": {"type": "string", "description": "Repo owner, e.g. 'fastapi'."},
+                    "repo": {"type": "string", "description": "Repo name, e.g. 'fastapi'."},
+                },
+                "required": ["owner", "repo"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_recent_commits",
+            "description": (
+                "Get the most recent commits on a public repository's default branch "
+                "(sha, message, author, date)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "owner": {"type": "string", "description": "Repo owner, e.g. 'fastapi'."},
+                    "repo": {"type": "string", "description": "Repo name, e.g. 'fastapi'."},
+                    "limit": {"type": "integer", "description": "How many commits, 1-20 (default 5)."},
+                },
+                "required": ["owner", "repo"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_user_repos",
+            "description": (
+                "List a public GitHub user's or organization's repositories, sorted by "
+                "recent activity by default. Use for 'what repos/projects does X have'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "username": {"type": "string", "description": "GitHub login, e.g. 'torvalds'."},
+                    "limit": {"type": "integer", "description": "How many repos, 1-30 (default 10)."},
+                    "sort": {
+                        "type": "string",
+                        "enum": ["updated", "created", "pushed", "full_name"],
+                        "description": "Sort order (default 'updated').",
+                    },
+                },
+                "required": ["username"],
+            },
+        },
+    },
+]

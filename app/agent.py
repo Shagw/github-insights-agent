@@ -19,6 +19,7 @@ Two things worth calling out for interviews:
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, Callable
 
 import google.generativeai as genai
@@ -26,9 +27,15 @@ from google.generativeai.types import RequestOptions
 from pydantic import ValidationError
 
 from app import tools
-from app.config import GEMINI_MODEL, GEMINI_TIMEOUT
+from app.config import (
+    GEMINI_MODEL,
+    GEMINI_TIMEOUT,
+    GROQ_MODEL,
+    LLM_PROVIDER,
+    LLM_TIMEOUT,
+)
 from app.key_manager import AllKeysCoolingDown, key_manager
-from app.schemas import ARG_SCHEMAS, FUNCTION_DECLARATIONS
+from app.schemas import ARG_SCHEMAS, FUNCTION_DECLARATIONS, GROQ_TOOLS
 
 # Hard cap on Reason->Act->Observe iterations so the loop can never run forever.
 MAX_STEPS = 6
@@ -176,7 +183,23 @@ async def run_agent(
     history: list[dict[str, str]] | None = None,
     chat: Any | None = None,
 ) -> AgentResult:
-    """Run the Reason->Act->Observe loop for a single question.
+    """Run the agent for one question using the configured LLM provider.
+
+    Routes to Groq or Gemini based on LLM_PROVIDER. `history` seeds conversation
+    memory; `chat` injects a FakeChat for offline Gemini-path tests.
+    """
+    if chat is None and LLM_PROVIDER == "groq":
+        return await _run_groq(question, history=history)
+    return await _run_gemini(question, history=history, chat=chat)
+
+
+async def _run_gemini(
+    question: str,
+    *,
+    history: list[dict[str, str]] | None = None,
+    chat: Any | None = None,
+) -> AgentResult:
+    """Run the Reason->Act->Observe loop against Gemini.
 
     `history` is prior conversation ([{role, text}, ...]) used to seed memory so
     follow-up references resolve. `chat` can be injected (a FakeChat) for offline
@@ -227,6 +250,117 @@ async def run_agent(
         )
 
     # Ran out of steps without a final answer.
+    return AgentResult(
+        "I couldn't complete this within the allowed number of steps.",
+        MAX_STEPS,
+        tool_calls,
+    )
+
+
+# ==========================================================================
+# Groq provider (OpenAI-style tool calling)
+# ==========================================================================
+def _groq_client(api_key: str) -> Any:
+    """Build a Groq client for the given key (imported lazily)."""
+    from groq import Groq
+
+    return Groq(api_key=api_key, timeout=LLM_TIMEOUT)
+
+
+async def _groq_complete(messages: list[dict[str, Any]]) -> Any:
+    """Call Groq chat.completions with tools + key rotation, off the event loop.
+
+    Rotates keys on rate-limit/timeout errors, mirroring the Gemini path.
+    """
+    last_error: Exception | None = None
+    for _ in range(max(len(key_manager.keys), 1)):
+        current_key = key_manager.get_key()
+        client = _groq_client(current_key)
+
+        def _call() -> Any:
+            return client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=messages,
+                tools=GROQ_TOOLS,
+                tool_choice="auto",
+                temperature=0.2,
+            )
+
+        try:
+            return await asyncio.to_thread(_call)
+        except Exception as e:  # noqa: BLE001
+            text = str(e).lower()
+            retryable = (
+                "429" in text or "rate" in text or "quota" in text
+                or "timeout" in text or "503" in text or "overloaded" in text
+            )
+            if retryable:
+                key_manager.mark_rate_limited(current_key)
+                last_error = e
+                continue
+            raise
+    raise AllKeysCoolingDown() if last_error else RuntimeError("groq send failed")
+
+
+async def _run_groq(
+    question: str,
+    *,
+    history: list[dict[str, str]] | None = None,
+) -> AgentResult:
+    """Run the Reason->Act->Observe loop against Groq (OpenAI-style tools)."""
+    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_INSTRUCTION}]
+    # replay prior conversation ({role: user|model, text} -> OpenAI roles)
+    for h in history or []:
+        if not h.get("text"):
+            continue
+        role = "assistant" if h["role"] == "model" else "user"
+        messages.append({"role": role, "content": h["text"]})
+    messages.append({"role": "user", "content": question})
+
+    tool_calls: list[dict[str, Any]] = []
+
+    for step in range(1, MAX_STEPS + 1):
+        response = await _groq_complete(messages)
+        choice = response.choices[0].message
+
+        if not getattr(choice, "tool_calls", None):
+            # Final text answer.
+            return AgentResult(choice.content or "", step, tool_calls)
+
+        # Record the assistant turn (with its tool_calls) in the transcript.
+        messages.append(
+            {
+                "role": "assistant",
+                "content": choice.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                    }
+                    for tc in choice.tool_calls
+                ],
+            }
+        )
+
+        # Execute each requested tool and append a tool-result message.
+        for tc in choice.tool_calls:
+            name = tc.function.name
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            result = await _validate_and_run_tool(name, args)
+            tool_calls.append({"name": name, "args": args, "result": result})
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": name,
+                    "content": json.dumps(result),
+                }
+            )
+
     return AgentResult(
         "I couldn't complete this within the allowed number of steps.",
         MAX_STEPS,

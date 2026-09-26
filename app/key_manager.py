@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 
-from app.config import GEMINI_API_KEYS
+from app.config import GEMINI_API_KEYS, GROQ_API_KEYS, LLM_PROVIDER
 
 COOLDOWN_SECONDS = 60
 
@@ -20,15 +20,15 @@ class AllKeysCoolingDown(Exception):
     """Every API key is currently on cooldown (all rate-limited)."""
 
 
+class NoKeysConfigured(Exception):
+    """No API keys are configured for the active provider."""
+
+
 class KeyManager:
     def __init__(self, keys: list[str]):
         self.keys = keys
         self.cooldown_until: dict[str, float] = {}
         self._cursor = 0  # round-robin position
-        if not self.keys:
-            raise ValueError(
-                "No Gemini API keys found. Set GEMINI_API_KEY_1 in your .env file."
-            )
 
     def get_key(self) -> str:
         """Return the next available key in round-robin order.
@@ -38,6 +38,11 @@ class KeyManager:
         currently on cooldown are skipped. Raises AllKeysCoolingDown if every
         key is cooling down.
         """
+        if not self.keys:
+            raise NoKeysConfigured(
+                "No API keys configured for the active LLM provider. "
+                "Set GROQ_API_KEY (or GEMINI_API_KEY_1) in your .env."
+            )
         now = time.time()
         n = len(self.keys)
         for offset in range(n):
@@ -54,5 +59,6 @@ class KeyManager:
         self.cooldown_until[key] = time.time() + COOLDOWN_SECONDS
 
 
-# One shared instance for the whole app.
-key_manager = KeyManager(GEMINI_API_KEYS)
+# One shared instance for the whole app, using the ACTIVE provider's keys.
+_ACTIVE_KEYS = GROQ_API_KEYS if LLM_PROVIDER == "groq" else GEMINI_API_KEYS
+key_manager = KeyManager(_ACTIVE_KEYS)
