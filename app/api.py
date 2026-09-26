@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from app.agent import run_agent
 from app.key_manager import AllKeysCoolingDown
+from app.sessions import SessionStore, build_session_store
 
 logger = logging.getLogger("github_agent.api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -39,12 +40,34 @@ _request_id: ContextVar[str] = ContextVar("request_id", default="-")
 # --- simple in-process usage counters (reset on restart) ---
 USAGE = {"requests": 0, "chat_requests": 0, "tool_calls": 0, "errors": 0}
 
+# --- conversation session store (Redis, with in-memory fallback) ---
+# Built on startup; tests may replace it via set_session_store().
+_session_store: SessionStore | None = None
+
+
+def set_session_store(store: SessionStore) -> None:
+    """Inject a session store (used by tests)."""
+    global _session_store
+    _session_store = store
+
+
+async def get_session_store() -> SessionStore:
+    global _session_store
+    if _session_store is None:
+        _session_store = await build_session_store()
+    return _session_store
+
 
 # --------------------------------------------------------------------------
 # Request / response models
 # --------------------------------------------------------------------------
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
+    session_id: str | None = Field(
+        default=None,
+        description="Opaque conversation id. Omit to start a new conversation; "
+        "reuse the value returned in the response to continue it.",
+    )
 
 
 class ToolCallInfo(BaseModel):
@@ -58,6 +81,7 @@ class ChatResponse(BaseModel):
     steps: int
     tool_calls: list[ToolCallInfo]
     request_id: str
+    session_id: str
 
 
 # --------------------------------------------------------------------------
@@ -140,11 +164,21 @@ async def metrics(_: None = Depends(require_api_key)) -> dict:
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, _: None = Depends(require_api_key)) -> ChatResponse:
-    """Run the agent on a question and return the answer + trace."""
+    """Run the agent on a question and return the answer + trace.
+
+    If a session_id is supplied (or generated), prior conversation history is
+    loaded and replayed so follow-up questions resolve references; the new turn
+    is then saved back to the session store.
+    """
     rid = _request_id.get()
     USAGE["chat_requests"] += 1
+
+    store = await get_session_store()
+    session_id = req.session_id or uuid.uuid4().hex
+    history = await store.get_history(session_id)
+
     try:
-        result = await run_agent(req.question)
+        result = await run_agent(req.question, history=history)
     except AllKeysCoolingDown:
         USAGE["errors"] += 1
         raise HTTPException(
@@ -156,10 +190,14 @@ async def chat(req: ChatRequest, _: None = Depends(require_api_key)) -> ChatResp
         logger.exception("[%s] agent failed", rid)
         raise HTTPException(status_code=500, detail=f"Agent error: {type(e).__name__}")
 
+    # persist this turn so the next request in the session remembers it
+    await store.append_turn(session_id, req.question, result.answer)
+
     USAGE["tool_calls"] += len(result.tool_calls)
     return ChatResponse(
         answer=result.answer,
         steps=result.steps,
         tool_calls=[ToolCallInfo(**tc) for tc in result.tool_calls],
         request_id=rid,
+        session_id=session_id,
     )

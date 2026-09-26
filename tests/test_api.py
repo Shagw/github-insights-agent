@@ -18,7 +18,11 @@ def client(monkeypatch):
     """A TestClient with auth enabled and the agent faked (no Gemini/network)."""
     monkeypatch.setenv("API_KEY", API_KEY)
 
-    async def fake_run_agent(question, *, chat=None):
+    # inject an in-memory session store so tests never touch real Redis
+    from app.sessions import SessionStore, _MemoryBackend
+    api.set_session_store(SessionStore(_MemoryBackend(), kind="memory"))
+
+    async def fake_run_agent(question, *, history=None, chat=None):
         return AgentResult(
             answer=f"Answer to: {question}",
             steps=2,
@@ -80,7 +84,7 @@ def test_metrics_counts_usage(client):
 
 
 def test_all_keys_cooling_returns_503(client, monkeypatch):
-    async def boom(question, *, chat=None):
+    async def boom(question, *, history=None, chat=None):
         raise AllKeysCoolingDown()
 
     monkeypatch.setattr(api, "run_agent", boom)
@@ -89,7 +93,7 @@ def test_all_keys_cooling_returns_503(client, monkeypatch):
 
 
 def test_agent_error_returns_500(client, monkeypatch):
-    async def boom(question, *, chat=None):
+    async def boom(question, *, history=None, chat=None):
         raise RuntimeError("kaboom")
 
     monkeypatch.setattr(api, "run_agent", boom)
@@ -101,3 +105,32 @@ def test_agent_error_returns_500(client, monkeypatch):
 def test_cors_header_present(client):
     r = client.get("/health", headers={"Origin": "http://localhost:5173"})
     assert r.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
+def test_chat_returns_session_id(client):
+    r = client.post("/chat", json={"question": "hi"}, headers=_auth())
+    assert r.status_code == 200
+    assert r.json()["session_id"]  # a new session id is minted
+
+
+def test_session_memory_carries_history(client, monkeypatch):
+    """Second turn with the same session_id should receive the prior turn as history."""
+    seen = {}
+
+    async def capture(question, *, history=None, chat=None):
+        seen["len"] = len(history or [])
+        return AgentResult(answer=f"echo {question}", steps=1, tool_calls=[])
+
+    monkeypatch.setattr(api, "run_agent", capture)
+
+    r1 = client.post("/chat", json={"question": "about torvalds"}, headers=_auth())
+    sid = r1.json()["session_id"]
+    assert seen["len"] == 0  # first turn: no history
+
+    r2 = client.post(
+        "/chat",
+        json={"question": "how many repos does the above user have?", "session_id": sid},
+        headers=_auth(),
+    )
+    assert r2.json()["session_id"] == sid
+    assert seen["len"] == 2  # second turn sees the prior user+model messages

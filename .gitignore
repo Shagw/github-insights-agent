@@ -1,5 +1,7 @@
 # secrets
 .env
+.env.bak
+.env.*
 
 # python
 venv/

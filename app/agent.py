@@ -48,6 +48,7 @@ TOOL_IMPLS: dict[str, Callable[..., Any]] = {
     "get_user_info": tools.get_user_info,
     "list_languages": tools.list_languages,
     "list_recent_commits": tools.list_recent_commits,
+    "list_user_repos": tools.list_user_repos,
 }
 
 
@@ -105,15 +106,27 @@ async def _validate_and_run_tool(name: str, args: dict[str, Any]) -> dict[str, A
         return {"error": f"{name} failed: {type(e).__name__}: {e}"}
 
 
-def _new_chat() -> Any:
-    """Configure Gemini with the current key and start a tool-enabled chat."""
+def _new_chat(history: list[dict[str, str]] | None = None) -> Any:
+    """Configure Gemini with the current key and start a tool-enabled chat.
+
+    `history` is prior conversation as [{role, text}, ...] (role in
+    {"user","model"}); it is replayed so follow-up questions can resolve
+    references like "the above user".
+    """
     genai.configure(api_key=key_manager.get_key())
     model = genai.GenerativeModel(
         GEMINI_MODEL,
         tools=[genai.protos.Tool(function_declarations=FUNCTION_DECLARATIONS)],
         system_instruction=SYSTEM_INSTRUCTION,
     )
-    return model.start_chat()
+    seeded = None
+    if history:
+        seeded = [
+            {"role": h["role"], "parts": [{"text": h["text"]}]}
+            for h in history
+            if h.get("text")
+        ]
+    return model.start_chat(history=seeded)
 
 
 async def _send(chat: Any, message: Any) -> Any:
@@ -138,14 +151,20 @@ async def _send(chat: Any, message: Any) -> Any:
     raise AllKeysCoolingDown() if last_error else RuntimeError("send failed")
 
 
-async def run_agent(question: str, *, chat: Any | None = None) -> AgentResult:
+async def run_agent(
+    question: str,
+    *,
+    history: list[dict[str, str]] | None = None,
+    chat: Any | None = None,
+) -> AgentResult:
     """Run the Reason->Act->Observe loop for a single question.
 
-    `chat` can be injected (a FakeChat) for offline testing; otherwise a real
-    Gemini chat is started.
+    `history` is prior conversation ([{role, text}, ...]) used to seed memory so
+    follow-up references resolve. `chat` can be injected (a FakeChat) for offline
+    testing; otherwise a real Gemini chat is started (seeded with `history`).
     """
     if chat is None:
-        chat = _new_chat()
+        chat = _new_chat(history)
 
     tool_calls: list[dict[str, Any]] = []
     message: Any = question

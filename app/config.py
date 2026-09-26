@@ -29,3 +29,10 @@ def _collect_gemini_keys() -> list[str]:
 GEMINI_API_KEYS: list[str] = _collect_gemini_keys()
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip()
 GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "").strip()
+
+# --- Sessions ---
+REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0").strip()
+# How long a conversation stays alive (seconds) since its last turn.
+SESSION_TTL: int = int(os.getenv("SESSION_TTL", "3600"))
+# Cap history length replayed to the model, to bound token cost.
+MAX_HISTORY_TURNS: int = int(os.getenv("MAX_HISTORY_TURNS", "12"))
