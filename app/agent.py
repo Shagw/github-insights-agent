@@ -46,6 +46,8 @@ SYSTEM_INSTRUCTION = (
 TOOL_IMPLS: dict[str, Callable[..., Any]] = {
     "get_repo_info": tools.get_repo_info,
     "get_user_info": tools.get_user_info,
+    "list_languages": tools.list_languages,
+    "list_recent_commits": tools.list_recent_commits,
 }
 
 

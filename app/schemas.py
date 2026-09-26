@@ -21,7 +21,7 @@ view of each tool clean and under our control.
 from __future__ import annotations
 
 import google.generativeai as genai
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # --------------------------------------------------------------------------
@@ -54,11 +54,43 @@ class GetUserInfoArgs(BaseModel):
         return value
 
 
+class ListLanguagesArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    owner: str
+    repo: str
+
+    @field_validator("owner", "repo")
+    @classmethod
+    def nonempty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must be a nonempty string")
+        return value
+
+
+class ListRecentCommitsArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    owner: str
+    repo: str
+    # Bounded integer: the model may omit it (default 5) but never exceed 20.
+    limit: int = Field(default=5, ge=1, le=20)
+
+    @field_validator("owner", "repo")
+    @classmethod
+    def nonempty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must be a nonempty string")
+        return value
+
+
 # Maps a tool name -> its Pydantic validator. The agent uses this to validate
 # arguments before dispatching. Keeping it as a dict makes adding tools trivial.
 ARG_SCHEMAS: dict[str, type[BaseModel]] = {
     "get_repo_info": GetRepoInfoArgs,
     "get_user_info": GetUserInfoArgs,
+    "list_languages": ListLanguagesArgs,
+    "list_recent_commits": ListRecentCommitsArgs,
 }
 
 
@@ -111,8 +143,60 @@ get_user_info_declaration = genai.protos.FunctionDeclaration(
     ),
 )
 
+list_languages_declaration = genai.protos.FunctionDeclaration(
+    name="list_languages",
+    description=(
+        "Get the programming-language breakdown of a public GitHub repository as "
+        "percentages of code (e.g. Python 82%, HTML 12%). Use this when the user "
+        "asks what languages a repository is written in or the language mix."
+    ),
+    parameters=genai.protos.Schema(
+        type=_Type.OBJECT,
+        properties={
+            "owner": genai.protos.Schema(
+                type=_Type.STRING,
+                description="The user or organization that owns the repo, e.g. 'fastapi'.",
+            ),
+            "repo": genai.protos.Schema(
+                type=_Type.STRING,
+                description="The repository name, e.g. 'fastapi'.",
+            ),
+        },
+        required=["owner", "repo"],
+    ),
+)
+
+list_recent_commits_declaration = genai.protos.FunctionDeclaration(
+    name="list_recent_commits",
+    description=(
+        "Get the most recent commits on a public GitHub repository's default "
+        "branch, including short SHA, message, author, and date. Use this when the "
+        "user asks about recent activity, latest changes, or recent commits."
+    ),
+    parameters=genai.protos.Schema(
+        type=_Type.OBJECT,
+        properties={
+            "owner": genai.protos.Schema(
+                type=_Type.STRING,
+                description="The user or organization that owns the repo, e.g. 'fastapi'.",
+            ),
+            "repo": genai.protos.Schema(
+                type=_Type.STRING,
+                description="The repository name, e.g. 'fastapi'.",
+            ),
+            "limit": genai.protos.Schema(
+                type=_Type.INTEGER,
+                description="How many recent commits to return, 1-20 (default 5).",
+            ),
+        },
+        required=["owner", "repo"],
+    ),
+)
+
 # The full set of declarations handed to the model as `tools=[...]`.
 FUNCTION_DECLARATIONS = [
     get_repo_info_declaration,
     get_user_info_declaration,
+    list_languages_declaration,
+    list_recent_commits_declaration,
 ]
