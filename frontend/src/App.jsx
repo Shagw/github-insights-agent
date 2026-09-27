@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // The dev server proxies /api -> the FastAPI backend (see vite.config.js),
 // so we call /api/chat from the browser with no CORS hassle.
@@ -135,7 +137,13 @@ export default function App() {
           {messages.map((m, i) => (
             <Row key={i} role={m.role}>
               <div style={{ ...S.bubble, ...bubbleStyle(m.role) }}>
-                <div style={S.bubbleText}>{m.text}</div>
+                {m.role === "agent" ? (
+                  <div style={S.bubbleText} className="md">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <div style={S.bubbleText}>{m.text}</div>
+                )}
                 {(m.tools || m.steps != null) && (
                   <div style={S.metaRow}>
                     {(m.tools?.length ? m.tools : ["no tools"]).map((t, k) => (
@@ -223,6 +231,19 @@ function StyleTag() {
       .chip:disabled { opacity:.5; cursor:not-allowed; }
       ::-webkit-scrollbar { width: 8px; }
       ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:8px; }
+      /* markdown rendering inside agent bubbles */
+      .md p { margin: 0 0 8px; }
+      .md p:last-child { margin-bottom: 0; }
+      .md ul, .md ol { margin: 4px 0 8px; padding-left: 20px; }
+      .md li { margin: 2px 0; }
+      .md code { background:#eef2ff; padding:1px 5px; border-radius:4px; font-size:12.5px; font-family: ui-monospace, monospace; }
+      .md pre { background:#0f172a; color:#e2e8f0; padding:10px 12px; border-radius:8px; overflow-x:auto; }
+      .md pre code { background:none; padding:0; color:inherit; }
+      .md a { color:#2563eb; }
+      .md table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 13px; display:block; overflow-x:auto; }
+      .md th, .md td { border: 1px solid #e2e8f0; padding: 5px 8px; text-align: left; }
+      .md th { background:#f8fafc; font-weight:600; }
+      .md h1, .md h2, .md h3 { font-size: 15px; margin: 8px 0 4px; }
     `}</style>
   );
 }
