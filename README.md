@@ -296,6 +296,15 @@ browser talks to a single origin (no CORS friction).
 
 ---
 
+## 🤝 Contributing
+
+Contributions are welcome! This is open source (MIT) — fork it, improve it, and open
+a pull request. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup, how to run the
+tests, and PR guidelines. Good first contributions: add a new read-only GitHub tool,
+add eval cases, or improve the React UI.
+
+---
+
 ## 📄 License
 
-MIT — free to use and adapt.
+MIT — free to use and adapt. See [LICENSE](LICENSE).
