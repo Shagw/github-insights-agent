@@ -1,5 +1,11 @@
 # 🐙 GitHub Insights Agent
 
+[![CI](https://github.com/Shagw/github-insights-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Shagw/github-insights-agent/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![Tests](https://img.shields.io/badge/tests-60%20passing-brightgreen)
+![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+
 An **async AI agent** that answers natural-language questions about public GitHub
 repositories and users. It uses a fast LLM (Groq by default, Gemini optional) to
 reason, and calls the **GitHub
@@ -37,6 +43,24 @@ tool design, resilience, observability, and tests** — not a heavy UI.
 ---
 
 ## 🧠 How it works
+
+```mermaid
+flowchart TD
+    U([User question]) --> API[FastAPI /chat]
+    API --> S[(Redis session<br/>memory)]
+    API --> L{Agent loop<br/>Reason - Act - Observe}
+    L -->|question + tool specs| M[LLM<br/>Groq / Gemini]
+    M -->|function call name + args| V[Validate args<br/>Pydantic extra=forbid]
+    V -->|valid| T[Async tool]
+    V -->|invalid| M
+    T --> GH[GitHub client<br/>timeouts - retry - cache]
+    GH --> API2[(GitHub REST API)]
+    API2 --> T
+    T -->|tool result| M
+    M -->|final answer| API
+    API --> U
+```
+
 
 ```
                           ┌──────────────────────────────────────┐
