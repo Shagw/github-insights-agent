@@ -150,9 +150,13 @@ async def _send(chat: Any, message: Any, *, rebuild=None) -> tuple[Any, Any]:
     same chat object after reconfiguring.
     """
     last_error: Exception | None = None
-    for _ in range(len(key_manager.keys)):
-        current_key = key_manager.get_key()
-        genai.configure(api_key=current_key)
+    for _ in range(max(len(key_manager.keys), 1)):
+        # Configure a key if we have one; injected FakeChats (tests) need none.
+        if key_manager.keys:
+            current_key = key_manager.get_key()
+            genai.configure(api_key=current_key)
+        else:
+            current_key = None
         try:
             response = await asyncio.to_thread(
                 chat.send_message,
@@ -166,7 +170,7 @@ async def _send(chat: Any, message: Any, *, rebuild=None) -> tuple[Any, Any]:
                 "429" in text or "quota" in text or "rate" in text
                 or "resource" in text or "timeout" in text or "deadline" in text
             )
-            if retryable:
+            if retryable and current_key is not None:
                 key_manager.mark_rate_limited(current_key)
                 last_error = e
                 if rebuild is not None:
