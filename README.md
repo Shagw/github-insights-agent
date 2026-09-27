@@ -18,6 +18,10 @@ answer in the data the tools returned.
 Built as a backend-focused portfolio project: the emphasis is on the **agent loop,
 tool design, resilience, observability, and tests** — not a heavy UI.
 
+## 🎬 Demo
+
+![GitHub Insights Agent demo](docs/demo.gif)
+
 ---
 
 ## ✨ What it does
