@@ -255,7 +255,7 @@ const S = {
     padding: 24, fontFamily: "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
   },
   card: {
-    width: "100%", maxWidth: 720, height: "min(88vh, 760px)", background: "#f8fafc",
+    width: "100%", maxWidth: 900, height: "min(90vh, 860px)", background: "#f8fafc",
     borderRadius: 20, boxShadow: "0 20px 60px rgba(0,0,0,.45)", display: "flex",
     flexDirection: "column", overflow: "hidden", border: "1px solid rgba(255,255,255,.08)",
   },
